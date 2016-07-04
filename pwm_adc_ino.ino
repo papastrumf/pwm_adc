@@ -11,100 +11,142 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdlib.h>
+#if defined(__AVR_ATmega328P__)
+#define PWMpin   11     // OC2A - ATmega328
+#define AD1pin   15     // ATmega328
+#define AD2pin   16     // ATmega328
+#else
+#define PWMpin   0      // /OC1A - ATtiny85
+#define AD1pin   2      // ATtiny85
+#define AD2pin   4      // ATtiny85
+#endif
+#define RSTpin   5
+#define WKUPpin  3
 #define VTRG 163       // (3.3 * (2.7 / 12.7)) / 1.1 * 255 [mV]
-#define NUZR 32
+#define NUZR 24
 
-//int pwm = 0;           // /OC1A - ATtiny85
-int pwm = 11;          // OC2A - ATmega328
 int napon1;            // ocitana vrijednost
 int napon2;
 int br;                // counter
-//int ad1 = 2, ad2 = 4;  // ATtiny85
-int ad1 = 15, ad2 = 16;  // ATmega328
 int PWM1;              // ovo ide u PWM reg.
 int PWM2;              // prijasnja vrijednost PWM1
 int rst_st = 0;
-int esp_rst = 3;
 int slp_st = 0;
 int pwm12[NUZR +1][2];
-int delta;
+int inic_delta;         // pocetna razlika napona (struja kroz R)
+long slp_tmr;
+long mls, mls_slp;
 
 // the setup routine runs once when you press reset:
 void setup() {
   // declare pin 0 to be an output:
-  pinMode(pwm, OUTPUT);
-  pinMode(ad1, INPUT);
-  pinMode(ad2, INPUT);
-  pinMode(esp_rst, OUTPUT);
+  pinMode(PWMpin, OUTPUT);
+  pinMode(AD1pin, INPUT);
+  pinMode(AD2pin, INPUT);
+  pinMode(RSTpin, OUTPUT);
+  pinMode(WKUPpin, OUTPUT);
   delay(10);
 
-  digitalWrite(esp_rst, LOW);
+//  digitalWrite(RSTpin, HIGH);
 //  TCCR0B = 0<<WGM02 | 1<<CS01;    // za pin1 TC-0
 //  TCCR1 = 0<<PWM1A | 0<<COM1A0 | 1<<CS10;
 //  GTCCR = 1<<PWM1B | 2<<COM1B0;
 
-// ATtiny85  //
-/*  TCNT1 = 0;
-  TCCR1 = 0;
-  GTCCR = 1<<PSR1;
-  TCCR1 = 1<<PWM1A | 1<<COM1A0 | 1<<CS10;
-  OCR1A = 0x3F;
-  OCR1C = 0x7F;
-  PWM1 = 0x3F;  */
 // ATmega328  //
+#if defined(__AVR_ATmega328P__)
   TCNT2 = 0;
   TCCR2A = 1<<COM2A1 | 1<<COM2A0 | 1<<WGM21 | 1<<WGM20;
   TCCR2B = 1<<CS20;
   OCR2A = 0x7F;
   PWM1 = 0x7F;
+#else
+// ATtiny85  //
+  TCNT1 = 0;
+  TCCR1 = 0;
+  GTCCR = 1<<PSR1;
+  TCCR1 = 1<<PWM1A | 1<<COM1A0 | 1<<CS10;
+  OCR1A = 0x3F;
+  OCR1C = 0x7F;
+  PWM1 = 0x3F;
+#endif
 
-//  ADMUX = 0xA1;  // ATtiny85
+#if defined(__AVR_ATmega328P__)
   ADCSRA = 1<<ADEN | 1<<ADPS2;  // ATmega328 - 0x84
   ADMUX = 1<<REFS1 | 1<<REFS0 | 1<<ADLAR | 1<<MUX0;  // 0xE1
+#else
+  ADCSRA = 1<<ADEN | 1<<ADPS2 | 1<<ADPS1 | 1<<ADPS0;  // ATtiny85 - 0x87
+  ADMUX = 0xA1;  // ATtiny85
+#endif
 
+  digitalWrite(WKUPpin, HIGH);
+#if defined(__AVR_ATmega328P__)
   Serial.begin(115200);
   Serial.println("ola!");
-  delay(100);
-  br=0;
-  delta = 0;
+#endif
+
+  mls = millis() + 100;
+  while(millis() < mls)  ;
+  br = 0;
+  inic_delta = 0;
 }
 
-// the loop routine runs over and over again forever:
+
 void loop() {
-//  ADMUX = 0xA1;  // ATtiny85
+#if defined(__AVR_ATmega328P__)
   ADMUX = 0xE1;  // ATmega328
-//  delay(5);
+#else
+  ADMUX = 0xA1;  // ATtiny85
+#endif
   ADCSRA |= (1<<ADSC);
-  while(ADCSRA & (1<<ADSC))  // ADSC
+  while(ADCSRA & (1<<ADSC)) {  // ADSC
+#if defined(__AVR_ATmega328P__)
     Serial.print(".");
+#endif
+    ;
+  }
   napon1 = (int)ADCH;
 
+#if defined(__AVR_ATmega328P__)
   ADMUX = 0xE2;  // ATmega328
-//  delay(5);
-  ADCSRA |= 0x40;
-  while(ADCSRA & (1<<ADSC))  // ADSC
+  ADMUX = 0xA1;  // ATtiny85
+#endif
+  ADCSRA |= (1<<ADSC);
+  while(ADCSRA & (1<<ADSC)) {  // ADSC
+#if defined(__AVR_ATmega328P__)
     Serial.print("-");
+#endif
+    ;
+  }
   napon2 = (int)ADCH;
 
   PWM2 = PWM1;
   if(napon1 > VTRG) {
-    if(napon1 - VTRG > 12 && PWM1 > 9)  PWM1 -= 8;
+#if defined(__AVR_ATmega328P__)
+    if(napon1 - VTRG > 48 && PWM1 > 48)  PWM1 -= 40;
+    else if(napon1 - VTRG > 12 && PWM1 > 9)  PWM1 -= 8;
+#else
+    if(napon1 - VTRG > 48 && PWM1 > 48)  PWM1 -= 40;
+    else if(napon1 - VTRG > 12 && PWM1 > 9)  PWM1 -= 8;
+#endif
     else  PWM1--;
-//    PWM1--;
   } else if(VTRG > napon1) {
+#if defined(__AVR_ATmega328P__)
     if(VTRG - napon1 > 48 && PWM1 < 150)  PWM1 += 80;
     else if(VTRG - napon1 > 12 && PWM1 < 245)  PWM1 += 8;
+#else
+    if(VTRG - napon1 > 48 && PWM1 < 75)  PWM1 += 40;
+    else if(VTRG - napon1 > 12 && PWM1 < 122)  PWM1 += 8;
+#endif
     else  PWM1++;
-//    PWM1++;
 /*
   } else if(!rst_st) {
     rst_st = 1;
-    digitalWrite(esp_rst, HIGH);
+    digitalWrite(RSTpin, LOW);
 */
   }
 
-  pwm12[br % NUZR][0] = napon1;
-  pwm12[br % NUZR][1] = napon2;
+  pwm12[br % NUZR][0] = napon1;  // napon iza R
+  pwm12[br % NUZR][1] = napon2;  // napon prije R
   pwm12[NUZR][0] = 0;
   pwm12[NUZR][1] = 0;
   for(int i=0; i<NUZR; i++) {
@@ -114,24 +156,38 @@ void loop() {
   pwm12[NUZR][0] /= NUZR;
   pwm12[NUZR][1] /= NUZR;
   br++;
-  if(br == 8192)  br=NUZR *2;
+  if(br == 6144)  br=NUZR *8;    // vrati brojac da ne ode u minus
   
-//  OCR1A = PWM1;  //  ATtiny85
+#if defined(__AVR_ATmega328P__)
   OCR2A = PWM1;  //  ATmega328
+#else
+  OCR1A = PWM1;  //  ATtiny85
+#endif
+#if defined(__AVR_ATmega328P__)
   Serial.print("PWM: ");
   Serial.print(PWM1);
   Serial.print(", A1: ");
   Serial.print(napon1);
-//  if(PWM1 < 0 || PWM1 > 127) {
-  if(PWM1 <= 2 || PWM1 >= 252) {
+#endif
+#if defined(__AVR_ATmega328P__)
+  if(PWM1 <= 2 || PWM1 >= 252) {    // ATmega328
+#else
+  if(PWM1 < 0 || PWM1 > 127) {    // ATtiny85
+#endif
     PWM1 = PWM2;
-//    OCR1A = PWM1;  //  ATtiny85
+#if defined(__AVR_ATmega328P__)
     OCR2A = PWM1;  //  ATmega328
+#else
+    OCR1A = PWM1;  //  ATtiny85
+#endif
   }
+#if defined(__AVR_ATmega328P__)
   Serial.print(", A2: ");
   Serial.print(napon2);
   Serial.print(", dif: ");
-  Serial.println(pwm12[NUZR][1] - pwm12[NUZR][0]);
+  Serial.print(pwm12[NUZR][1] - pwm12[NUZR][0]);
+  if(slp_st)  Serial.println("  \\");
+  else  Serial.println("  /");
 /*
   Serial.print(", ave: ");
   Serial.print(pwm12[NUZR][0]);
@@ -140,16 +196,36 @@ void loop() {
   Serial.print(", br: ");
   Serial.println(br);
 */
+#endif
   
-  if(br == 5 * NUZR)  delta = pwm12[NUZR][1] - pwm12[NUZR][0];
-  if(delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] < delta *3 /5) && !slp_st) {
+  if(br == 5 * NUZR)  inic_delta = pwm12[NUZR][1] - pwm12[NUZR][0] +1;
+  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] < inic_delta *3 /5) && !slp_st) {
     slp_st = 1;
+#if defined(__AVR_ATmega328P__)
+    Serial.print(" inic delta: ");
+    Serial.println(inic_delta); 
     Serial.println(" **** pocni odbrojavanje ****");
+#endif
+    mls_slp = millis() +120000;
   }
-  if(delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] > delta *4 /5) && slp_st) {
+  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] > inic_delta *4 /5) && slp_st) {
     slp_st = 0;
+    slp_tmr = 0;
+#if defined(__AVR_ATmega328P__)
     Serial.println(" ******* budjenje *******");
+#endif
   }
-  delay(20);
+  if(slp_st && mls_slp <= millis()) {
+    slp_st = 0;
+#if defined(__AVR_ATmega328P__)
+    Serial.println(" ******* timer 0 *******");
+#endif
+    digitalWrite(WKUPpin, LOW);    
+    mls = millis() + 20;
+    while(millis() < mls)  ;
+    digitalWrite(WKUPpin, HIGH);
+  }
+  mls = millis() + 20;
+  while(millis() < mls)  ;
 }
 
