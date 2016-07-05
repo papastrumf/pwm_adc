@@ -24,6 +24,11 @@
 #define WKUPpin  3
 #define VTRG 163       // (3.3 * (2.7 / 12.7)) / 1.1 * 255 [mV]
 #define NUZR 24
+#if defined(__AVR_ATmega328P__)
+#define PWM_MAX  255
+#else
+#define PWM_MAX  127
+#endif
 
 int napon1;            // ocitana vrijednost
 int napon2;
@@ -32,9 +37,9 @@ int PWM1;              // ovo ide u PWM reg.
 int PWM2;              // prijasnja vrijednost PWM1
 int rst_st = 0;
 int slp_st = 0;
-int pwm12[NUZR +1][2];
+int pwm12[NUZR +1][3];
 int inic_delta;         // pocetna razlika napona (struja kroz R)
-long slp_tmr;
+int inic_pwm;
 long mls, mls_slp;
 
 // the setup routine runs once when you press reset:
@@ -84,10 +89,11 @@ void setup() {
   Serial.println("ola!");
 #endif
 
-  mls = millis() + 100;
+  mls = millis() + 55;
   while(millis() < mls)  ;
   br = 0;
   inic_delta = 0;
+  inic_pwm = 0;
 }
 
 
@@ -147,14 +153,18 @@ void loop() {
 
   pwm12[br % NUZR][0] = napon1;  // napon iza R
   pwm12[br % NUZR][1] = napon2;  // napon prije R
+  pwm12[br % NUZR][2] = PWM1;    // sirina impulsa PWM (za DCDC)
   pwm12[NUZR][0] = 0;
   pwm12[NUZR][1] = 0;
+  pwm12[NUZR][2] = 0;
   for(int i=0; i<NUZR; i++) {
     pwm12[NUZR][0] += pwm12[i][0];
     pwm12[NUZR][1] += pwm12[i][1];
+    pwm12[NUZR][2] += pwm12[i][2];
   }
   pwm12[NUZR][0] /= NUZR;
   pwm12[NUZR][1] /= NUZR;
+  pwm12[NUZR][2] /= NUZR;
   br++;
   if(br == 6144)  br=NUZR *8;    // vrati brojac da ne ode u minus
   
@@ -198,8 +208,12 @@ void loop() {
 */
 #endif
   
-  if(br == 5 * NUZR)  inic_delta = pwm12[NUZR][1] - pwm12[NUZR][0] +1;
-  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] < inic_delta *3 /5) && !slp_st) {
+  if(br == 5 * NUZR) {
+    inic_delta = pwm12[NUZR][1] - pwm12[NUZR][0] +1;
+    inic_pwm = pwm12[NUZR][2] +1;
+  }
+//  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] < inic_delta *3 /5) && !slp_st) {
+  if(inic_pwm > 0 && (pwm12[NUZR][2] < PWM_MAX /2) && !slp_st) {
     slp_st = 1;
 #if defined(__AVR_ATmega328P__)
     Serial.print(" inic delta: ");
@@ -208,14 +222,20 @@ void loop() {
 #endif
     mls_slp = millis() +120000;
   }
-  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] > inic_delta *4 /5) && slp_st) {
+//  if(inic_delta > 0 && (pwm12[NUZR][1] - pwm12[NUZR][0] > inic_delta *4 /5) && slp_st) {
+  if(inic_pwm > 0 && (pwm12[NUZR][2] > PWM_MAX /2) && slp_st) {
     slp_st = 0;
-    slp_tmr = 0;
 #if defined(__AVR_ATmega328P__)
     Serial.println(" ******* budjenje *******");
 #endif
   }
   if(slp_st && mls_slp <= millis()) {
+    PWM1 += 12;
+#if defined(__AVR_ATmega328P__)
+    OCR2A = PWM1;  //  ATmega328
+#else
+    OCR1A = PWM1;  //  ATtiny85
+#endif
     slp_st = 0;
 #if defined(__AVR_ATmega328P__)
     Serial.println(" ******* timer 0 *******");
@@ -224,8 +244,9 @@ void loop() {
     mls = millis() + 20;
     while(millis() < mls)  ;
     digitalWrite(WKUPpin, HIGH);
+  } else {                // inace pricekaj
+    mls = millis() + 20;
+    while(millis() < mls)  ;
   }
-  mls = millis() + 20;
-  while(millis() < mls)  ;
 }
 
