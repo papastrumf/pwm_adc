@@ -264,7 +264,7 @@ void loop() {
     Serial.println(" ******* timer 0 *******");
 #endif
     digitalWrite(WKUpin, LOW);    
-    mls = millis() + 10;
+    mls = millis() + 5;
     while(millis() < mls)  ;
     digitalWrite(WKUpin, HIGH);
   } else if(!slp_st && (mls_slp +150000) < millis()) {
@@ -272,7 +272,7 @@ void loop() {
 //    2 i pol minute proslo, nije detektiran sleep (Ubat < 3.6V), probudi ESP
 //
       digitalWrite(WKUpin, LOW);    
-      mls = millis() + 10;
+      mls = millis() + 5;
       while(millis() < mls)  ;
       digitalWrite(WKUpin, HIGH);
       mls_slp = millis();
@@ -282,7 +282,7 @@ void loop() {
 //      while(millis() < mls)  ;
 //      digitalWrite(ENPpin, HIGH);
   } else {                // inace pricekaj
-    mls = millis() + 10;
+    mls = millis() + 5;
     while(millis() < mls)  ;
   }
 /*
